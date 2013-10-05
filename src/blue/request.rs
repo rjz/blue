@@ -13,6 +13,7 @@ pub trait Request: Clone + RawRequest {
 }
 
 impl<T: RawRequest> Request for T {
+
     fn get_method(&self) -> Method {
         self.raw_request().method
     }
@@ -23,23 +24,50 @@ impl<T: RawRequest> Request for T {
 }
 
 #[deriving(Clone)]
-pub struct GenericRequest {
+pub struct DirtyRequest {
     priv original_request: ~::http::server::Request
 }
 
-impl RawRequest for GenericRequest {
+impl DirtyRequest {
+    pub fn from_request<R: Request> (r: R) -> DirtyRequest {
+        DirtyRequest { original_request: r.raw_request().clone() }
+    }
+
+    pub fn is_dirty(&self) {
+        println("Dirty!")
+    }
+}
+
+impl RawRequest for DirtyRequest {
     fn raw_request (&self) -> ~::http::server::Request {
         self.original_request.clone()
     }
 }
 
-impl RawRequest for ~GenericRequest {
+#[deriving(Clone)]
+pub struct SimpleRequest {
+    priv original_request: ~::http::server::Request
+}
+
+impl SimpleRequest {
+    pub fn from_request<R: Request>(r: R) -> SimpleRequest {
+        SimpleRequest { original_request: r.raw_request().clone() }
+    }
+}
+
+impl RawRequest for SimpleRequest {
     fn raw_request (&self) -> ~::http::server::Request {
         self.original_request.clone()
     }
 }
 
-pub fn generic (og: ~::http::server::Request) -> GenericRequest {
-    GenericRequest { original_request: og }
+impl RawRequest for ~SimpleRequest {
+    fn raw_request (&self) -> ~::http::server::Request {
+        self.original_request.clone()
+    }
+}
+
+pub fn generic (og: ~::http::server::Request) -> SimpleRequest {
+    SimpleRequest { original_request: og }
 }
 

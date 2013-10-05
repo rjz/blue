@@ -3,87 +3,59 @@ extern mod http;
 extern mod blue;
 
 use std::rt::io::net::ip::{ SocketAddr, Ipv4Addr };
-use std::rt::io::Writer;
 
-use http::server::{ Config, Server, ServerUtil, Request, ResponseWriter };
-use http::status;
-
-use blue::{ Handler, Respond, Pass };
+use http::server::{ Config, Request, Server, ServerUtil, ResponseWriter };
 
 mod demo {
+    use blue::{ Filter, FilterResult, Pass, Send };
+    use blue::request::{ Request, DirtyRequest, SimpleRequest };
+    use blue::response::{ SimpleResponse };
 
-    use extra::json;
+    // A simple routing service
+    pub struct FizService;
 
-    use blue::request::{ Request, generic };
-    use blue::response::{ Response, GenericResponse, JsonResponse };
-    use blue::{ Handler, Respond, HandlerResult, Pass };
+    impl Filter<SimpleRequest, DirtyRequest, SimpleResponse> for FizService {
+        fn filter (&self, req: SimpleRequest) -> FilterResult<DirtyRequest, SimpleResponse> {
 
-    // GET /
-    // Demonstrates sending a JSON response
-    fn demo(_: @Request) -> HandlerResult {
+            // TODO: extract route matching / handling into a more general router
+            let method = req.get_method().to_str();
+            let path = req.get_uri().to_str();
 
-        // TODO: even in the middle of a kludgy experiment, this part is
-        //       *exceptionally* terrible. We should actually compose the
-        //       JSON object to be sent back...
-        let res = JsonResponse {
-            status: 200,
-            body: match json::from_str("{\"hello\":\"world\"}") {
-                Ok(r) => ~r,
-                _     => ~json::Null
-            }
-        };
+            let resO = match (method, path) {
+                (~"GET", ~"/")    => Some(SimpleResponse { status: 200, body: ~"ok" }),
+                (~"GET", ~"/foo") => Some(SimpleResponse { status: 200, body: ~"foo" }),
+                _ => None
+            };
 
-        Respond(@res as @Response)
-    }
+            let reqOut = DirtyRequest::from_request(req);
 
-    // GET /foo
-    // Demonstrates sending a generic response
-    fn foobar(_: @Request) -> HandlerResult {
-        let res = GenericResponse {
-            status: 200,
-            body: ~"Foobar!"
-        };
-
-        Respond(@res as @Response)
-    }
-
-    #[deriving(Clone)]
-    pub struct Service;
-
-    impl Handler for Service {
-        fn handle(&self, r: @Request) -> HandlerResult {
-            // TODO: generalize this into some kind of Routing
-            match (r.get_method().to_str(), r.get_uri().to_str()) {
-                (~"GET", ~"/") => demo(r),
-                (~"GET", ~"/foo") => foobar(r),
-                _              => Pass(r)
+            match resO {
+                Some(res) => Send(res),
+                _ => Pass(reqOut)
             }
         }
     }
 
-    pub struct LoggerFilter {
-        prefix: ~str
-    }
+    // A logging service
+    pub struct LogService;
 
-    impl Handler for LoggerFilter {
-        fn handle(&self, r: @Request) -> HandlerResult {
-            // We don't always need to pass the original request through. It
-            // may be useful, for instance, to identify a Parsed request or
-            // an Authenticated request via explicit types.
-            //
-            // This is pointless; we could make it less so.
-            let dupe = generic(r.raw_request());
-            println(self.prefix + " " + r.get_method().to_str() + " " + r.get_uri().to_str());
-            Pass(@dupe as @Request)
+    impl Filter<SimpleRequest, SimpleRequest, SimpleResponse> for LogService {
+        fn filter (&self, req: SimpleRequest) -> FilterResult<SimpleRequest, SimpleResponse> {
+
+            let method = req.get_method().to_str();
+            let path = req.get_uri().to_str();
+
+            println(method + " " + path);
+            Pass(SimpleRequest::from_request(req))
         }
     }
 
-    pub struct ErrorHandler;
+    // A pass-through service
+    pub struct PassService;
 
-    impl Handler for ErrorHandler {
-        fn handle(&self, _: @Request) -> HandlerResult {
-            let res = GenericResponse { status: 500, body: ~"Failed" };
-            Respond(@res as @Response)
+    impl Filter<SimpleRequest, SimpleRequest, SimpleResponse> for PassService {
+        fn filter (&self, req: SimpleRequest) -> FilterResult<SimpleRequest, SimpleResponse> {
+            Pass(SimpleRequest::from_request(req))
         }
     }
 }
@@ -94,37 +66,25 @@ struct DemoServer;
 impl Server for DemoServer {
 
     fn get_config(&self) -> Config {
-        Config { bind_address: SocketAddr { ip: Ipv4Addr(127, 0, 0, 1), port: 8001 } }
+        Config { bind_address: SocketAddr { ip: Ipv4Addr(127, 0, 0, 1), port: 3200 } }
     }
 
-    fn handle_request(&self, r: &Request, w: &mut ResponseWriter) {
+    fn handle_request(&self, httpReq: &Request, httpRes: &mut ResponseWriter) {
+        let p = demo::PassService;
+        let s = demo::FizService;
+        let l = demo::LogService;
 
-        let logFilter: demo::LoggerFilter = demo::LoggerFilter { prefix: ~"Req:" };
+        let res = blue::handle(httpReq)
+            .using(l)
+            .using(p)
+            .using(s);
 
-        let hs: demo::Service = demo::Service;
-        let es: demo::ErrorHandler = demo::ErrorHandler;
-        let handlers: &[@blue::Handler] = &[
-            @logFilter as @blue::Handler,
-            @hs as @blue::Handler,
-            @es as @blue::Handler
-        ];
-
-        match blue::run_all(~blue::request::generic(~r.clone()), handlers) {
-            blue::Pass(_)  => { println("Request wasn't handled appropriately #panick!") },
-            blue::Respond(m) => {
-                // TODO: add in content-type, at least.
-                w.status = status::Ok;
-                w.write(m.to_bytes());
-            }
-            blue::Error(_) => {
-                println("error happened.");
-            }
-        }
+        blue::respond(res, httpRes)
     }
 }
 
 fn main() {
-    println("Off and running at :8001");
+    println("Off and running at :3200");
     DemoServer.serve_forever();
 }
 
