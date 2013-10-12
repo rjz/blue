@@ -12,11 +12,12 @@ extern mod http;
 use http::server::{ ResponseWriter };
 use http::status;
 
-use request::{ Request };
+use request::{ RawRequest, Request };
 use response::{ Response };
 
 pub mod request;
 pub mod response;
+pub mod content_type;
 
 pub enum FilterResult<Q, S> {
     Pass(Q),
@@ -47,7 +48,7 @@ pub fn respond<Q: Request, S: Response> (r: FilterResult<Q, S>, httpRes: &mut Re
     let (s, b, t) = match r {
         Send(res) => (res.get_status(), res.to_str(), res.content_type()),
         Pass(_) => (500, ~"Miss.", (~"text", ~"plain")),
-        Fail(s) => (500, s.to_str(), (~"text", ~"plain"))
+        Fail(err) => (500, err.to_str(), (~"text", ~"plain"))
     };
 
     let (type_, subtype) = t;

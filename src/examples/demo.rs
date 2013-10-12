@@ -6,32 +6,47 @@ use std::rt::io::net::ip::{ SocketAddr, Ipv4Addr };
 
 use http::server::{ Config, Request, Server, ServerUtil, ResponseWriter };
 
+
 mod demo {
+    use extra::json;
+    use extra::treemap::TreeMap;
+
     use blue::{ Filter, FilterResult, Pass, Send, Fail };
     use blue::request::{ Request, DirtyRequest, SimpleRequest };
     use blue::response::{ SimpleResponse };
 
-    // A simple routing service
-    pub struct FizService;
+    type Route<B> = (~str, ~str, extern fn(~B) -> Option<SimpleResponse>);
 
-    impl Filter<SimpleRequest, DirtyRequest, SimpleResponse> for FizService {
+    // A simple routing service
+    // TODO: generalize route matching, callback parameterization
+    pub struct RoutingService {
+        // `<R: Request>` would be a much better callback parameter than `int`
+        routes: ~[Route<int>]
+    }
+
+    impl Filter<SimpleRequest, DirtyRequest, SimpleResponse> for RoutingService {
         fn filter (&self, req: SimpleRequest) -> FilterResult<DirtyRequest, SimpleResponse> {
 
-            // TODO: extract route matching / handling into a more general router
             let method = req.get_method().to_str();
             let path = req.get_uri().to_str();
+            let req = DirtyRequest::from_request(req);
 
-            let resO = match (method, path) {
-                (~"GET", ~"/")    => Some(SimpleResponse { status: 200, body: ~"ok" }),
-                (~"GET", ~"/foo") => Some(SimpleResponse { status: 200, body: ~"foo" }),
-                _ => None
-            };
+            // Check that method / path match
+            let resO = self.routes.iter().skip_while(|&r| {
+                match r.clone() {
+                    (m, p, _) => (m != method || p != path)
+                }
+            }).next();
 
-            let reqOut = DirtyRequest::from_request(req);
-
+            // Check that the handler actually returns a response
             match resO {
-                Some(res) => Send(res),
-                _ => Pass(reqOut)
+              Some(a) => match a {
+                &(_, _, func) => match func(~42) {
+                  Some(res) => Send(res),
+                  _ => Pass(req)
+                }
+              },
+              _ => Pass(req)
             }
         }
     }
@@ -50,15 +65,6 @@ mod demo {
         }
     }
 
-    // A pass-through service
-    pub struct PassService;
-
-    impl Filter<SimpleRequest, SimpleRequest, SimpleResponse> for PassService {
-        fn filter (&self, req: SimpleRequest) -> FilterResult<SimpleRequest, SimpleResponse> {
-            Pass(SimpleRequest::from_request(req))
-        }
-    }
-
     // A naive static file server
     pub struct StaticFilter {
       static_dir: ~str
@@ -66,9 +72,8 @@ mod demo {
 
     impl Filter<DirtyRequest, DirtyRequest, SimpleResponse> for StaticFilter {
         fn filter (&self, req: DirtyRequest) -> FilterResult<DirtyRequest, SimpleResponse> {
+            use std::{ io, os };
             use std::path::Path;
-            use std::io;
-            use std::os;
 
             let path = req.get_uri().to_str();
             let p = &Path(self.static_dir + path);
@@ -84,6 +89,32 @@ mod demo {
             }
         }
     }
+
+    // Build a router
+    pub fn a_router () -> RoutingService {
+
+        fn json_pair (a: ~str, b: ~str) -> ~json::Json {
+            let mut j = TreeMap::new();
+            j.insert(a, json::String(b));
+            ~json::Object(~j.clone())
+        }
+
+        fn a (i: ~int) -> Option<SimpleResponse> {
+          println("'a' called with: " + i.to_str());
+          Some(SimpleResponse::from_json(200, json_pair(~"hello", ~"world")))
+        };
+
+        fn b (i: ~int) -> Option<SimpleResponse> {
+          println("'b' called with: " + i.to_str());
+          Some(SimpleResponse { body: ~"bar", status: 200 })
+        };
+
+        RoutingService { routes: ~[
+            (~"GET", ~"/", a),
+            (~"GET", ~"/foo", b),
+        ]}
+    }
+
 }
 
 #[deriving(Clone)]
@@ -96,16 +127,14 @@ impl Server for DemoServer {
     }
 
     fn handle_request(&self, httpReq: &Request, httpRes: &mut ResponseWriter) {
-        let p = demo::PassService;
-        let s = demo::FizService;
+
         let l = demo::LogService;
 
-        let public = demo::StaticFilter { dir: ~"static" };
+        let public = demo::StaticFilter { static_dir: ~"static" };
 
         let res = blue::handle(httpReq)
             .using(l)
-            .using(p)
-            .using(s)
+            .using(demo::a_router())
             .using(public);
 
         blue::respond(res, httpRes)

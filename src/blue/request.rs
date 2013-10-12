@@ -29,12 +29,12 @@ pub struct DirtyRequest {
 }
 
 impl DirtyRequest {
-    pub fn from_request<R: Request> (r: R) -> DirtyRequest {
-        DirtyRequest { original_request: r.raw_request().clone() }
-    }
-
     pub fn is_dirty(&self) {
         println("Dirty!")
+    }
+
+    pub fn from_request<R: RawRequest> (r: R) -> DirtyRequest {
+        DirtyRequest { original_request: r.raw_request().clone() }
     }
 }
 
@@ -50,18 +50,12 @@ pub struct SimpleRequest {
 }
 
 impl SimpleRequest {
-    pub fn from_request<R: Request>(r: R) -> SimpleRequest {
+    pub fn from_request<R: RawRequest>(r: R) -> SimpleRequest {
         SimpleRequest { original_request: r.raw_request().clone() }
     }
 }
 
 impl RawRequest for SimpleRequest {
-    fn raw_request (&self) -> ~::http::server::Request {
-        self.original_request.clone()
-    }
-}
-
-impl RawRequest for ~SimpleRequest {
     fn raw_request (&self) -> ~::http::server::Request {
         self.original_request.clone()
     }

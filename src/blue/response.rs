@@ -1,6 +1,6 @@
 extern mod extra;
 
-use extra::json::Json;
+use extra::json;
 
 pub trait Response : ToStr {
     fn get_status(&self) -> int;
@@ -12,6 +12,13 @@ pub struct SimpleResponse {
     status: int,
     body: ~str
 }
+
+impl SimpleResponse {
+    pub fn from_json(status: int, body: ~json::Json) -> SimpleResponse {
+      SimpleResponse { status: status, body: body.to_pretty_str() }
+    }
+}
+
 
 impl Response for SimpleResponse {
     fn get_status (&self) -> int {
@@ -32,7 +39,7 @@ impl ToStr for SimpleResponse {
 // A JSON Response
 pub struct JsonResponse {
     status: int,
-    body: ~Json
+    body: ~json::Json
 }
 
 impl Response for JsonResponse {
