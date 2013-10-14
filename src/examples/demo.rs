@@ -6,7 +6,6 @@ use std::rt::io::net::ip::{ SocketAddr, Ipv4Addr };
 
 use http::server::{ Config, Request, Server, ServerUtil, ResponseWriter };
 
-
 mod demo {
     use extra::json;
     use extra::treemap::TreeMap;
@@ -19,19 +18,20 @@ mod demo {
 
     // A simple routing service
     // TODO: generalize route matching, callback parameterization
-    pub struct RoutingService {
+    pub struct RoutingService<R> {
         // `<R: Request>` would be a much better callback parameter than `int`
-        routes: ~[Route<int>]
+        routes: ~[Route<R>]
     }
 
-    impl Filter<SimpleRequest, DirtyRequest, SimpleResponse> for RoutingService {
+    impl Filter<SimpleRequest, DirtyRequest, SimpleResponse> for RoutingService<SimpleRequest> {
         fn filter (&self, req: SimpleRequest) -> FilterResult<DirtyRequest, SimpleResponse> {
 
             let method = req.get_method().to_str();
             let path = req.get_uri().to_str();
-            let req = DirtyRequest::from_request(req);
+            let reqOut = DirtyRequest::from_request(req.clone());
 
-            // Check that method / path match
+            // Match method / path
+            // TODO: match wildcards, parameters, etc, etc
             let resO = self.routes.iter().skip_while(|&r| {
                 match r.clone() {
                     (m, p, _) => (m != method || p != path)
@@ -39,14 +39,15 @@ mod demo {
             }).next();
 
             // Check that the handler actually returns a response
+            // TODO: match wildcards, fill in parameters, etc, etc
             match resO {
-              Some(a) => match a {
-                &(_, _, func) => match func(~42) {
-                  Some(res) => Send(res),
-                  _ => Pass(req)
-                }
-              },
-              _ => Pass(req)
+                Some(a) => match a {
+                    &(_, _, func) => match func(~req.clone()) {
+                        Some(res) => Send(res),
+                        _ => Pass(reqOut)
+                    }
+                },
+                _ => Pass(reqOut)
             }
         }
     }
@@ -67,7 +68,7 @@ mod demo {
 
     // A naive static file server
     pub struct StaticFilter {
-      static_dir: ~str
+        static_dir: ~str
     }
 
     impl Filter<DirtyRequest, DirtyRequest, SimpleResponse> for StaticFilter {
@@ -90,8 +91,8 @@ mod demo {
         }
     }
 
-    // Build a router
-    pub fn a_router () -> RoutingService {
+    // Build a router for handling simple requests
+    pub fn a_router () -> RoutingService<SimpleRequest> {
 
         fn json_pair (a: ~str, b: ~str) -> ~json::Json {
             let mut j = TreeMap::new();
@@ -99,13 +100,11 @@ mod demo {
             ~json::Object(~j.clone())
         }
 
-        fn a (i: ~int) -> Option<SimpleResponse> {
-          println("'a' called with: " + i.to_str());
+        fn a (req: ~SimpleRequest) -> Option<SimpleResponse> {
           Some(SimpleResponse::from_json(200, json_pair(~"hello", ~"world")))
         };
 
-        fn b (i: ~int) -> Option<SimpleResponse> {
-          println("'b' called with: " + i.to_str());
+        fn b (req: ~SimpleRequest) -> Option<SimpleResponse> {
           Some(SimpleResponse { body: ~"bar", status: 200 })
         };
 
